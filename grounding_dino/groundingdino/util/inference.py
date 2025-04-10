@@ -49,6 +49,58 @@ def load_image(image_path: str) -> Tuple[np.array, torch.Tensor]:
     image_transformed, _ = transform(image_source, None)
     return image, image_transformed
 
+def predict_batch(
+        model,
+        images: torch.Tensor,
+        caption: str,
+        box_threshold: float,
+        text_threshold: float,
+        device: str = "cuda"
+) -> Tuple[torch.Tensor, torch.Tensor, List[str]]:
+    caption = preprocess_caption(caption=caption)
+
+    model = model.to(device)
+    image = images.to(device)
+
+    print(f"Image shape: {image.shape}") # Image shape: torch.Size([num_batch, 3, 800, 1200])
+    with torch.no_grad():
+        outputs = model(image, captions=[caption for _ in range(len(images))]) # <------- I use the same caption for all the images for my use-case
+
+    final_boxes = []
+    final_logits = []
+    final_phrases = []
+    for idx, _ in enumerate(range(outputs["pred_boxes"].shape[0])):
+        prediction_logits = outputs["pred_logits"].cpu().sigmoid()[idx]  # prediction_logits.shape = (nq, 256)
+        prediction_boxes = outputs["pred_boxes"].cpu()[idx]  # prediction_boxes.shape = (nq, 4)
+
+        mask = prediction_logits.max(dim=1)[0] > box_threshold
+        logits = prediction_logits[mask]  # logits.shape = (n, 256)
+        boxes = prediction_boxes[mask]  # boxes.shape = (n, 4)
+
+        tokenizer = model.tokenizer
+        tokenized = tokenizer(caption)
+
+        if False:
+            sep_idx = [i for i in range(len(tokenized['input_ids'])) if tokenized['input_ids'][i] in [101, 102, 1012]]
+
+            phrases = []
+            for logit in logits:
+                max_idx = logit.argmax()
+                insert_idx = bisect.bisect_left(sep_idx, max_idx)
+                right_idx = sep_idx[insert_idx]
+                left_idx = sep_idx[insert_idx - 1]
+                phrases.append(get_phrases_from_posmap(logit > text_threshold, tokenized, tokenizer, left_idx, right_idx).replace('.', ''))
+        else:
+            phrases = [
+                get_phrases_from_posmap(logit > text_threshold, tokenized, tokenizer).replace('.', '')
+                for logit
+                in logits
+            ]
+
+        final_boxes.append(boxes)
+        final_logits.append(logits.max(dim=1)[0])
+        final_phrases.append(phrases)
+    return final_boxes, final_logits, final_phrases
 
 def predict(
         model,
@@ -76,10 +128,10 @@ def predict(
 
     tokenizer = model.tokenizer
     tokenized = tokenizer(caption)
-    
+
     if remove_combined:
         sep_idx = [i for i in range(len(tokenized['input_ids'])) if tokenized['input_ids'][i] in [101, 102, 1012]]
-        
+
         phrases = []
         for logit in logits:
             max_idx = logit.argmax()
@@ -98,7 +150,7 @@ def predict(
 
 
 def annotate(image_source: np.ndarray, boxes: torch.Tensor, logits: torch.Tensor, phrases: List[str]) -> np.ndarray:
-    """    
+    """
     This function annotates an image with bounding boxes and labels.
 
     Parameters:
@@ -180,7 +232,7 @@ class Model:
             image=processed_image,
             caption=caption,
             box_threshold=box_threshold,
-            text_threshold=text_threshold, 
+            text_threshold=text_threshold,
             device=self.device)
         source_h, source_w, _ = image.shape
         detections = Model.post_process_result(
