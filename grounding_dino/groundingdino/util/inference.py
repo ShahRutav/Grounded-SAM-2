@@ -62,10 +62,12 @@ def predict_batch(
     model = model.to(device)
     image = images.to(device)
 
-    print(f"Image shape: {image.shape}") # Image shape: torch.Size([num_batch, 3, 800, 1200])
+    # print(f"Image shape: {image.shape}") # Image shape: torch.Size([num_batch, 3, 800, 1200])
     with torch.no_grad():
         outputs = model(image, captions=[caption for _ in range(len(images))]) # <------- I use the same caption for all the images for my use-case
 
+    tokenizer = model.tokenizer
+    tokenized = tokenizer(caption)
     final_boxes = []
     final_logits = []
     final_phrases = []
@@ -76,9 +78,6 @@ def predict_batch(
         mask = prediction_logits.max(dim=1)[0] > box_threshold
         logits = prediction_logits[mask]  # logits.shape = (n, 256)
         boxes = prediction_boxes[mask]  # boxes.shape = (n, 4)
-
-        tokenizer = model.tokenizer
-        tokenized = tokenizer(caption)
 
         if False:
             sep_idx = [i for i in range(len(tokenized['input_ids'])) if tokenized['input_ids'][i] in [101, 102, 1012]]

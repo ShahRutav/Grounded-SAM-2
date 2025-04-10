@@ -222,6 +222,13 @@ class RandomHorizontalFlip(object):
             return hflip(img, target)
         return img, target
 
+class Resize(object):
+    def __init__(self, size, max_size=None):
+        self.size = size
+        self.max_size = max_size
+
+    def __call__(self, img, target=None):
+        return resize(img, target, self.size, self.max_size)
 
 class RandomResize(object):
     def __init__(self, sizes, max_size=None):
